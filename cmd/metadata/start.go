@@ -53,6 +53,40 @@ var start = &cobra.Command{
 			if wPath != internal.GlobalConfig.MusicPath && !info.IsDir() && info.Name() != ".DS_Store" {
 				logrus.Infof("add metadata to file: %s", wPath)
 
+				var isNeedToCreateNewFile bool
+
+				fileNameSplit := strings.Split(info.Name(), ".")
+				trackExt := fileNameSplit[len(fileNameSplit)-1]
+
+				fileNameSplit = fileNameSplit[:len(fileNameSplit)-1]
+				trackID := strings.Join(fileNameSplit, "")
+
+				newDirPath := path.Join(
+					internal.GlobalConfig.OutputPath,
+					strings.ReplaceAll(albums[tAlbums[trackID].AlbumId].ArtistsString, " ", "_"),
+					strings.ReplaceAll(albums[tAlbums[trackID].AlbumId].Title, " ", "_"),
+				)
+				newFilePath := path.Join(
+					newDirPath,
+					strings.Join(
+						[]string{
+							strings.ReplaceAll(tracks[trackID].Title, " ", "_"),
+							trackExt,
+						},
+						"."),
+				)
+
+				if _, err := os.Stat(newFilePath); err == nil {
+					logrus.Warnf("file already exists: %s", newFilePath)
+					return nil
+				} else if errors.Is(err, os.ErrNotExist) {
+					isNeedToCreateNewFile = true
+				} else {
+					isNeedToCreateNewFile = true
+					logrus.Warnf("Cannot check file exists: %s, err: %s", newFilePath, err.Error())
+					return nil
+				}
+
 				tags, err := id3v2.Open(wPath, id3v2.Options{Parse: true})
 				if err != nil {
 					logrus.Warnf("Cannot get tags: %s, err: %s", wPath, err.Error())
@@ -60,12 +94,6 @@ var start = &cobra.Command{
 				}
 
 				logrus.Infof("tags before: %d", tags.Count())
-
-				fileNameSplit := strings.Split(info.Name(), ".")
-				trackExt := fileNameSplit[len(fileNameSplit)-1]
-
-				fileNameSplit = fileNameSplit[:len(fileNameSplit)-1]
-				trackID := strings.Join(fileNameSplit, "")
 
 				tags.SetArtist(albums[tAlbums[trackID].AlbumId].ArtistsString)
 				tags.SetAlbum(albums[tAlbums[trackID].AlbumId].Title)
@@ -92,21 +120,6 @@ var start = &cobra.Command{
 				_ = tags.Close()
 				logrus.Info("tags saved ok")
 
-				newDirPath := path.Join(
-					internal.GlobalConfig.OutputPath,
-					strings.ReplaceAll(albums[tAlbums[trackID].AlbumId].ArtistsString, " ", "_"),
-					strings.ReplaceAll(albums[tAlbums[trackID].AlbumId].Title, " ", "_"),
-				)
-				newFilePath := path.Join(
-					newDirPath,
-					strings.Join(
-						[]string{
-							strings.ReplaceAll(tracks[trackID].Title, " ", "_"),
-							trackExt,
-						},
-						"."),
-				)
-
 				logrus.Infof("creating new file path: %s", newFilePath)
 				err = os.MkdirAll(
 					newDirPath,
@@ -117,10 +130,7 @@ var start = &cobra.Command{
 					return nil
 				}
 
-				if _, err := os.Stat(newFilePath); err == nil {
-					logrus.Warnf("file already exists: %s", newFilePath)
-					return nil
-				} else if errors.Is(err, os.ErrNotExist) {
+				if isNeedToCreateNewFile {
 					input, err := os.ReadFile(wPath)
 					if err != nil {
 						logrus.Errorf("Cannot read input file: %s, err: %s", wPath, err.Error())
@@ -132,9 +142,6 @@ var start = &cobra.Command{
 						logrus.Errorf("Cannot create output file: %s, err: %s", newFilePath, err.Error())
 						return nil
 					}
-				} else {
-					logrus.Warnf("Cannot check file exists: %s, err: %s", newFilePath, err.Error())
-					return nil
 				}
 
 				logrus.Infof("ok creating new file path: %s", newFilePath)
