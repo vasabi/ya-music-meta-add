@@ -27,6 +27,10 @@ var start = &cobra.Command{
 			albumT       = "T_Album"
 		)
 
+		logrus.Infof("output path: %s", internal.GlobalConfig.OutputPath)
+		logrus.Infof("input files path: %s", internal.GlobalConfig.MusicPath)
+		logrus.Infof("input db path: %s", internal.GlobalConfig.DBPath)
+
 		db, err := sqlittle.Open(internal.GlobalConfig.DBPath)
 		if err != nil {
 			logrus.Fatalf("Cannot read db file: %s, err: %s", internal.GlobalConfig.DBPath, err.Error())
