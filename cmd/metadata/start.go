@@ -2,12 +2,11 @@ package metadata
 
 import (
 	"github.com/alicebob/sqlittle"
-	"github.com/gcottom/audiometa"
+	"github.com/bogem/id3v2/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"ya-music-meta-add/internal"
 	"ya-music-meta-add/internal/model"
@@ -47,13 +46,7 @@ var start = &cobra.Command{
 			if wPath != internal.GlobalConfig.MusicPath && !info.IsDir() && info.Name() != ".DS_Store" {
 				logrus.Infof("path: %s", wPath)
 
-				file, err := os.ReadFile(wPath)
-				if err != nil {
-					logrus.Warnf("Cannot open file: %s, err: %s", wPath, err.Error())
-					return nil
-				}
-
-				tags, err := audiometa.OpenTag(wPath)
+				tags, err := id3v2.Open(wPath, id3v2.Options{Parse: true})
 				if err != nil {
 					logrus.Warnf("Cannot get tags: %s, err: %s", wPath, err.Error())
 					return nil
@@ -62,23 +55,24 @@ var start = &cobra.Command{
 				logrus.Infof("%+v", tags)
 
 				fileNameSplit := strings.Split(info.Name(), ".")
-				trackType := fileNameSplit[len(fileNameSplit)-1]
-
 				fileNameSplit = fileNameSplit[:len(fileNameSplit)-1]
 				trackID := strings.Join(fileNameSplit, "")
 
 				logrus.Infof("%+v", trackID)
 
 				tags.SetArtist(albums[tAlbums[trackID].AlbumId].ArtistsString)
-				tags.SetAlbumArtist(albums[tAlbums[trackID].AlbumId].ArtistsString)
 				tags.SetAlbum(albums[tAlbums[trackID].AlbumId].Title)
 				tags.SetGenre(albums[tAlbums[trackID].AlbumId].GenreId)
 				tags.SetTitle(tracks[trackID].Title)
 				tags.SetYear(albums[tAlbums[trackID].AlbumId].Year)
-				tags.SetLyricist(tLyrics[trackID].FullLyrics)
-				tags.SetFileType(trackType)
-				tags.SetLength(strconv.Itoa(int(info.Size())))
-				tags.SetPartOfSet(albums[tAlbums[trackID].AlbumId].AlbumVersion)
+
+				lyrics := id3v2.UnsynchronisedLyricsFrame{
+					Encoding:          id3v2.EncodingUTF8,
+					Language:          "eng",
+					ContentDescriptor: tLyrics[trackID].Lyrics,
+					Lyrics:            tLyrics[trackID].FullLyrics,
+				}
+				tags.AddUnsynchronisedLyricsFrame(lyrics)
 
 				err = tags.Save()
 				if err != nil {
@@ -86,11 +80,7 @@ var start = &cobra.Command{
 					return nil
 				}
 
-				err = os.WriteFile("pp.mp3", file, 0644)
-				if err != nil {
-					logrus.Warnf("Cannot write file: %s, err: %s", wPath, err.Error())
-					return nil
-				}
+				_ = tags.Close()
 			}
 
 			return nil
