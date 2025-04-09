@@ -1,11 +1,13 @@
 package metadata
 
 import (
+	"errors"
 	"github.com/alicebob/sqlittle"
 	"github.com/bogem/id3v2/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"ya-music-meta-add/internal"
@@ -34,17 +36,18 @@ var start = &cobra.Command{
 			_ = db.Close()
 		}()
 
+		// собираем информацию о загруженных треках, альбомах и исполнителях из бд
+		logrus.Info("start collecting metadata from sqlite db")
 		tracks := getTracks(db, trackT)
 		tAlbums := getTrackAlbums(db, trackAlbumT)
 		tLyrics := getTrackLyrics(db, trackLyricsT)
 		albums := getAlbums(db, albumT)
-
-		logrus.Info(tracks, tAlbums, tLyrics, albums)
+		logrus.Info("finish collecting metadata from sqlite db")
 
 		err = filepath.Walk(internal.GlobalConfig.MusicPath, func(wPath string, info os.FileInfo, err error) error {
 			// Выводится название файла
 			if wPath != internal.GlobalConfig.MusicPath && !info.IsDir() && info.Name() != ".DS_Store" {
-				logrus.Infof("path: %s", wPath)
+				logrus.Infof("add metadata to file: %s", wPath)
 
 				tags, err := id3v2.Open(wPath, id3v2.Options{Parse: true})
 				if err != nil {
@@ -52,13 +55,13 @@ var start = &cobra.Command{
 					return nil
 				}
 
-				logrus.Infof("%+v", tags)
+				logrus.Infof("tags before: %d", tags.Count())
 
 				fileNameSplit := strings.Split(info.Name(), ".")
+				trackExt := fileNameSplit[len(fileNameSplit)-1]
+
 				fileNameSplit = fileNameSplit[:len(fileNameSplit)-1]
 				trackID := strings.Join(fileNameSplit, "")
-
-				logrus.Infof("%+v", trackID)
 
 				tags.SetArtist(albums[tAlbums[trackID].AlbumId].ArtistsString)
 				tags.SetAlbum(albums[tAlbums[trackID].AlbumId].Title)
@@ -73,14 +76,64 @@ var start = &cobra.Command{
 					Lyrics:            tLyrics[trackID].FullLyrics,
 				}
 				tags.AddUnsynchronisedLyricsFrame(lyrics)
+				logrus.Infof("tags after: %d", tags.Count())
 
+				logrus.Infof("save tags to file: %s", wPath)
 				err = tags.Save()
 				if err != nil {
-					logrus.Warnf("Cannot save tags: %s, tags: %+v, err: %s", wPath, tags, err.Error())
+					logrus.Warnf("Cannot save tags: %s, err: %s", wPath, err.Error())
 					return nil
 				}
 
 				_ = tags.Close()
+				logrus.Info("tags saved ok")
+
+				newDirPath := path.Join(
+					internal.GlobalConfig.OutputPath,
+					strings.ReplaceAll(albums[tAlbums[trackID].AlbumId].ArtistsString, " ", "_"),
+					strings.ReplaceAll(albums[tAlbums[trackID].AlbumId].Title, " ", "_"),
+				)
+				newFilePath := path.Join(
+					newDirPath,
+					strings.Join(
+						[]string{
+							strings.ReplaceAll(tracks[trackID].Title, " ", "_"),
+							trackExt,
+						},
+						"."),
+				)
+
+				logrus.Infof("creating new file path: %s", newFilePath)
+				err = os.MkdirAll(
+					newDirPath,
+					0755,
+				)
+				if err != nil {
+					logrus.Warnf("Cannot create dirs: %s, err: %s", newDirPath, err.Error())
+					return nil
+				}
+
+				if _, err := os.Stat(newFilePath); err == nil {
+					logrus.Warnf("file already exists: %s", newFilePath)
+					return nil
+				} else if errors.Is(err, os.ErrNotExist) {
+					input, err := os.ReadFile(wPath)
+					if err != nil {
+						logrus.Errorf("Cannot read input file: %s, err: %s", wPath, err.Error())
+						return nil
+					}
+
+					err = os.WriteFile(newFilePath, input, 0644)
+					if err != nil {
+						logrus.Errorf("Cannot create output file: %s, err: %s", newFilePath, err.Error())
+						return nil
+					}
+				} else {
+					logrus.Warnf("Cannot check file exists: %s, err: %s", newFilePath, err.Error())
+					return nil
+				}
+
+				logrus.Infof("ok creating new file path: %s", newFilePath)
 			}
 
 			return nil
